@@ -236,6 +236,133 @@ export function createReservaEmailContent(reserva: {
   return { text, html }
 }
 
+// Añadir o actualizar la función para crear el contenido del email de contacto
+
+// Función para generar el contenido del correo de contacto
+export function createContactEmailContent(contacto: {
+  nombre: string
+  email: string
+  telefono: string
+  asunto: string
+  mensaje: string
+}): { text: string; html: string } {
+  const text = `
+    Nuevo mensaje de contacto - Ayuntamiento de La Llosa
+    
+    Nombre: ${contacto.nombre}
+    Email: ${contacto.email}
+    Teléfono: ${contacto.telefono}
+    Asunto: ${contacto.asunto}
+    
+    Mensaje:
+    ${contacto.mensaje}
+  `
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Nuevo mensaje de contacto</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background-color: #22c55e;
+          color: white;
+          padding: 20px;
+          text-align: center;
+          border-radius: 8px 8px 0 0;
+        }
+        .content {
+          background-color: #f9f9f9;
+          padding: 20px;
+          border-radius: 0 0 8px 8px;
+          border: 1px solid #eaeaea;
+          border-top: none;
+        }
+        .message-details {
+          background-color: white;
+          padding: 15px;
+          border-radius: 8px;
+          margin: 20px 0;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .detail-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 8px 0;
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .detail-row:last-child {
+          border-bottom: none;
+        }
+        .message-content {
+          background-color: #f0f0f0;
+          padding: 15px;
+          border-radius: 8px;
+          margin-top: 20px;
+          white-space: pre-wrap;
+        }
+        .footer {
+          margin-top: 30px;
+          font-size: 12px;
+          color: #666;
+          text-align: center;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>Nuevo mensaje de contacto</h1>
+        <p>Ayuntamiento de La Llosa</p>
+      </div>
+      <div class="content">
+        <p>Se ha recibido un nuevo mensaje a través del formulario de contacto:</p>
+        
+        <div class="message-details">
+          <div class="detail-row">
+            <strong>Nombre:</strong>
+            <span>${contacto.nombre}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Email:</strong>
+            <span>${contacto.email}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Teléfono:</strong>
+            <span>${contacto.telefono}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Asunto:</strong>
+            <span>${contacto.asunto}</span>
+          </div>
+        </div>
+        
+        <h3>Mensaje:</h3>
+        <div class="message-content">${contacto.mensaje.replace(/\n/g, "<br>")}</div>
+      </div>
+      
+      <div class="footer">
+        <p><strong>Ayuntamiento de La Llosa</strong><br>
+        Plaza España, 14, 12591 La Llosa, Castellón<br>
+        Teléfono: +34 964 51 00 01<br>
+        Email: pruebasllosa@gmail.com</p>
+      </div>
+    </body>
+    </html>
+  `
+
+  return { text, html }
+}
+
 // Función para enviar notificación de reserva
 export async function sendReservaNotification(reserva: {
   nombre: string

@@ -5,6 +5,11 @@ export async function POST(request: Request) {
   try {
     const { to, subject, html, text } = await request.json()
 
+    // Validar que el destinatario sea el correo de la aplicación
+    if (to !== process.env.EMAIL && to !== "pruebasllosa@gmail.com") {
+      return NextResponse.json({ error: "Destinatario no autorizado" }, { status: 403 })
+    }
+
     const success = await sendEmail({
       to,
       subject,

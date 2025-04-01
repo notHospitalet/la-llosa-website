@@ -22,7 +22,7 @@ type PaymentModalProps = {
   isOpen: boolean
   onClose: () => void
   amount: number
-  onSuccess: () => void
+  onSuccess: (metodoPago: string) => void
   description: string
 }
 
@@ -38,7 +38,30 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validaciones básicas
+    // Si el monto es 0, no necesitamos validar los datos de pago
+    if (amount === 0) {
+      setIsProcessing(true)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        toast({
+          title: "Reserva confirmada",
+          description: "Tu reserva gratuita ha sido confirmada.",
+        })
+        onSuccess("gratuito")
+        onClose()
+      } catch (error) {
+        toast({
+          title: "Error en la reserva",
+          description: "Ha ocurrido un error. Por favor, inténtalo de nuevo.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsProcessing(false)
+      }
+      return
+    }
+
+    // Validaciones básicas para pagos con tarjeta
     if (paymentMethod === "card") {
       if (!cardNumber || !cardName || !cardExpiry || !cardCvc) {
         toast({
@@ -92,7 +115,7 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
         description: "Tu reserva ha sido confirmada.",
       })
 
-      onSuccess()
+      onSuccess(paymentMethod)
       onClose()
     } catch (error) {
       toast({
@@ -189,7 +212,7 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
             </RadioGroup>
           </div>
 
-          {paymentMethod === "card" && (
+          {paymentMethod === "card" && amount > 0 && (
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="card-number">Número de tarjeta</Label>
@@ -242,7 +265,7 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
             </div>
           )}
 
-          {paymentMethod === "bank" && (
+          {paymentMethod === "bank" && amount > 0 && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Realiza una transferencia bancaria a la siguiente cuenta:</p>
               <div className="rounded-md bg-muted p-3">
@@ -255,7 +278,7 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
             </div>
           )}
 
-          {paymentMethod === "bizum" && (
+          {paymentMethod === "bizum" && amount > 0 && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Realiza un pago Bizum al siguiente número:</p>
               <div className="rounded-md bg-muted p-3">
@@ -267,10 +290,19 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
             </div>
           )}
 
+          {amount === 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Esta reserva es gratuita. No se realizará ningún cargo.</p>
+              <div className="rounded-md bg-green-50 dark:bg-green-900/20 p-3 border border-green-200 dark:border-green-800">
+                <p className="text-sm text-green-700 dark:text-green-300">Reserva sin coste</p>
+              </div>
+            </div>
+          )}
+
           <div className="pt-4 border-t">
             <div className="flex justify-between items-center">
               <span className="font-medium">Total a pagar:</span>
-              <span className="text-xl font-bold">{amount.toFixed(2)} €</span>
+              <span className="text-xl font-bold">{amount === 0 ? "Gratis" : `${amount.toFixed(2)} €`}</span>
             </div>
           </div>
 
@@ -279,7 +311,7 @@ export function PaymentModal({ isOpen, onClose, amount, onSuccess, description }
               Cancelar
             </Button>
             <Button type="submit" disabled={isProcessing}>
-              {isProcessing ? "Procesando..." : "Pagar ahora"}
+              {isProcessing ? "Procesando..." : amount === 0 ? "Confirmar reserva" : "Pagar ahora"}
             </Button>
           </DialogFooter>
         </form>

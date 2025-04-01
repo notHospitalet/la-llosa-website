@@ -2,207 +2,229 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import Image from "next/image"
-import { Menu, X, User, LogOut } from "lucide-react"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/mode-toggle"
-import { motion } from "framer-motion"
-import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/components/auth-provider"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { LoginModal } from "@/components/login-modal"
+import { Menu, X, User, LogOut, Home, Calendar, Dumbbell, CreditCard, PocketIcon as Pool } from "lucide-react"
+import { useIsMobile } from "@/hooks/use-mobile" // Corregido: useMobile -> useIsMobile
+import { motion, AnimatePresence } from "framer-motion"
+
+// Definir las props para LoginModal si no están definidas
+interface LoginModalProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
-  const [scrolled, setScrolled] = useState(false)
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const pathname = usePathname()
-  const { isLoggedIn, user, logout } = useAuth()
-  const router = useRouter()
+  const isMobile = useIsMobile() // Usando useIsMobile en lugar de useMobile
+  const { isLoggedIn, logout, user } = useAuth()
+
+  // Cerrar el menú móvil cuando cambia la ruta
+  useEffect(() => {
+    setIsOpen(false)
+  }, [pathname])
+
+  // Cerrar el menú móvil cuando se cambia a vista de escritorio
+  useEffect(() => {
+    if (!isMobile) {
+      setIsOpen(false)
+    }
+  }, [isMobile])
 
   useEffect(() => {
-    const handleScroll = () => {
-      if (window.scrollY > 10) {
-        setScrolled(true)
-      } else {
-        setScrolled(false)
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (isProfileMenuOpen && !target.closest(".relative")) {
+        setIsProfileMenuOpen(false)
       }
     }
 
-    window.addEventListener("scroll", handleScroll)
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
-
-  const handleLogout = () => {
-    logout()
-    router.push("/")
-  }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [isProfileMenuOpen])
 
   const navLinks = [
-    { href: "/", label: "Inicio" },
-    { href: "/reservas-deportivas", label: "Reservas Deportivas" },
-    { href: "/reservas-gimnasio", label: "Reservas Gimnasio" },
-    { href: "/reservas-piscina", label: "Reservas Piscina" },
+    { href: "/", label: "Inicio", icon: <Home className="h-5 w-5 mr-2" /> },
+    { href: "/reservas-deportivas", label: "Reservas Deportivas", icon: <Calendar className="h-5 w-5 mr-2" /> },
+    { href: "/reservas-gimnasio", label: "Gimnasio", icon: <Dumbbell className="h-5 w-5 mr-2" /> },
+    { href: "/reservas-piscina", label: "Piscina", icon: <Pool className="h-5 w-5 mr-2" /> },
+    { href: "/contacto", label: "Contacto", icon: null },
   ]
 
+  const userLinks = [
+    { href: "/mis-reservas", label: "Mis Reservas", icon: <Calendar className="h-5 w-5 mr-2" /> },
+    { href: "/mis-bonos", label: "Mis Bonos", icon: <CreditCard className="h-5 w-5 mr-2" /> },
+    { href: "/perfil", label: "Mi Perfil", icon: <User className="h-5 w-5 mr-2" /> },
+  ]
+
+  const isActive = (path: string) => pathname === path
+
   return (
-    <header
-      className={`sticky top-0 z-50 w-full transition-all duration-300 ${
-        scrolled ? "bg-background/80 backdrop-blur-md shadow-sm" : "bg-background"
-      }`}
-    >
-      <div className="container mx-auto px-4 py-3">
-        <div className="flex items-center justify-between">
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container flex h-16 items-center justify-between">
+        <div className="flex items-center gap-2">
           <Link href="/" className="flex items-center space-x-2">
-            <Image
-              src="/placeholder.svg?height=40&width=40"
-              alt="Logo Ayuntamiento de La Llosa"
-              width={40}
-              height={40}
-              className="h-10 w-auto"
-            />
-            <span className="font-semibold text-lg hidden sm:inline-block">Ayuntamiento de La Llosa</span>
+            <span className="font-bold text-xl">La Llosa</span>
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-6">
+          {/* Navegación de escritorio */}
+          <nav className="hidden md:flex ml-6 space-x-4 text-base">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  pathname === link.href ? "text-primary" : "text-foreground/70"
+                className={`px-3 py-2 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground ${
+                  isActive(link.href) ? "bg-accent text-accent-foreground" : "text-foreground/70"
                 }`}
               >
                 {link.label}
               </Link>
             ))}
           </nav>
+        </div>
 
-          <div className="flex items-center space-x-2">
-            <ModeToggle />
+        <div className="flex items-center gap-2">
+          <ModeToggle />
 
-            {isLoggedIn ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <User className="h-4 w-4" />
-                    <span className="hidden sm:inline-block">{user?.name}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>Mi cuenta</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/perfil">Perfil</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/mis-reservas">Mis Reservas</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-500">
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Cerrar sesión
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <>
-                <Button variant="outline" size="sm" asChild className="hidden md:flex">
-                  <Link href="/login">Iniciar Sesión</Link>
+          {isLoggedIn ? (
+            <div className="hidden md:flex items-center gap-2">
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  className="flex items-center gap-2 text-base"
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                >
+                  <User className="h-5 w-5" />
+                  <span className="max-w-[100px] truncate">{user?.name || "Usuario"}</span>
                 </Button>
-                <Button size="sm" asChild className="hidden md:flex">
-                  <Link href="/registro">Registro</Link>
-                </Button>
-              </>
-            )}
+                {isProfileMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-background border border-border z-50">
+                    <div className="py-1">
+                      {userLinks.map((link) => (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          className="flex items-center px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => setIsProfileMenuOpen(false)}
+                        >
+                          {link.icon}
+                          {link.label}
+                        </Link>
+                      ))}
+                      <button
+                        onClick={() => {
+                          logout()
+                          setIsProfileMenuOpen(false)
+                        }}
+                        className="flex items-center w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <LogOut className="h-5 w-5 mr-2" />
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="hidden md:flex items-center gap-2">
+              <Button variant="outline" onClick={() => setShowLoginModal(true)} className="text-base">
+                Iniciar sesión
+              </Button>
+              <Button asChild className="text-base">
+                <Link href="/registro">Registrarse</Link>
+              </Button>
+            </div>
+          )}
 
-            {/* Mobile Menu Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              onClick={() => setIsOpen(!isOpen)}
-              aria-label="Toggle Menu"
-            >
-              {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </Button>
-          </div>
+          {/* Botón de menú móvil */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={() => setIsOpen(!isOpen)}
+            aria-label={isOpen ? "Cerrar menú" : "Abrir menú"}
+          >
+            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </Button>
         </div>
       </div>
 
-      {/* Mobile Navigation */}
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.2 }}
-          className="md:hidden bg-background border-b"
-        >
-          <div className="container mx-auto px-4 py-4 space-y-4">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`block py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  pathname === link.href ? "text-primary" : "text-foreground/70"
-                }`}
-                onClick={() => setIsOpen(false)}
-              >
-                {link.label}
-              </Link>
-            ))}
-            <div className="flex flex-col space-y-2 pt-2 border-t">
-              {isLoggedIn ? (
-                <>
+      {/* Menú móvil */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden border-t"
+          >
+            <div className="container py-4">
+              <nav className="flex flex-col space-y-2 text-base">
+                {navLinks.map((link) => (
                   <Link
-                    href="/perfil"
-                    className="flex items-center py-2 text-sm font-medium"
-                    onClick={() => setIsOpen(false)}
+                    key={link.href}
+                    href={link.href}
+                    className={`flex items-center px-3 py-2 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground ${
+                      isActive(link.href) ? "bg-accent text-accent-foreground" : "text-foreground/70"
+                    }`}
                   >
-                    Mi Perfil
+                    {link.icon}
+                    {link.label}
                   </Link>
-                  <Link
-                    href="/mis-reservas"
-                    className="flex items-center py-2 text-sm font-medium"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Mis Reservas
-                  </Link>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => {
-                      handleLogout()
-                      setIsOpen(false)
-                    }}
-                  >
-                    Cerrar sesión
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href="/login" onClick={() => setIsOpen(false)}>
-                      Iniciar Sesión
-                    </Link>
-                  </Button>
-                  <Button size="sm" asChild>
-                    <Link href="/registro" onClick={() => setIsOpen(false)}>
-                      Registro
-                    </Link>
-                  </Button>
-                </>
-              )}
+                ))}
+
+                {isLoggedIn ? (
+                  <>
+                    <div className="h-px bg-border my-2"></div>
+                    {userLinks.map((link) => (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className={`flex items-center px-3 py-2 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground ${
+                          isActive(link.href) ? "bg-accent text-accent-foreground" : "text-foreground/70"
+                        }`}
+                      >
+                        {link.icon}
+                        {link.label}
+                      </Link>
+                    ))}
+                    <button
+                      onClick={logout}
+                      className="flex items-center px-3 py-2 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 w-full text-left"
+                    >
+                      <LogOut className="h-5 w-5 mr-2" />
+                      Cerrar sesión
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col space-y-2 mt-4">
+                    <Button variant="outline" onClick={() => setShowLoginModal(true)} className="w-full text-base">
+                      Iniciar sesión
+                    </Button>
+                    <Button asChild className="w-full text-base">
+                      <Link href="/registro">Registrarse</Link>
+                    </Button>
+                  </div>
+                )}
+              </nav>
             </div>
-          </div>
-        </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de inicio de sesión */}
+      {showLoginModal && (
+        <LoginModal onSuccess={() => setShowLoginModal(false)} onClose={() => setShowLoginModal(false)} />
       )}
     </header>
   )

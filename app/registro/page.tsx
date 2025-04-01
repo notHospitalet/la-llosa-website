@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,7 +12,9 @@ import { useToast } from "@/components/ui/use-toast"
 import { motion } from "framer-motion"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react"
+import { useAuth } from "@/components/auth-provider"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function RegistroPage() {
   const [nombre, setNombre] = useState("")
@@ -23,37 +25,94 @@ export default function RegistroPage() {
   const [tipo, setTipo] = useState("local")
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const { toast } = useToast()
   const router = useRouter()
+  const { login, isLoggedIn } = useAuth()
+
+  useEffect(() => {
+    // Si el usuario ya está autenticado, redirigir a la página principal
+    if (isLoggedIn) {
+      router.push("/")
+    }
+  }, [isLoggedIn, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setErrorMessage(null)
+    setSuccessMessage(null)
 
     if (password !== confirmPassword) {
-      toast({
-        title: "Error en el registro",
-        description: "Las contraseñas no coinciden",
-        variant: "destructive",
-      })
+      setErrorMessage("Las contraseñas no coinciden")
+      return
+    }
+
+    if (password.length < 6) {
+      setErrorMessage("La contraseña debe tener al menos 6 caracteres")
       return
     }
 
     setIsLoading(true)
 
     try {
-      // Simulación de registro
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      // Enviar solicitud de registro
+      const registerResponse = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nombre,
+          email,
+          telefono,
+          password,
+          tipo,
+        }),
+      })
+
+      if (!registerResponse.ok) {
+        const errorData = await registerResponse.json()
+        throw new Error(errorData.message || "Error en el registro")
+      }
+
+      // Registro exitoso, ahora iniciar sesión automáticamente
+      const loginResponse = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      })
+
+      if (!loginResponse.ok) {
+        // Si el inicio de sesión falla, mostrar mensaje de registro exitoso pero sin inicio de sesión automático
+        setSuccessMessage("Tu cuenta ha sido creada correctamente. Ya puedes iniciar sesión.")
+        setTimeout(() => {
+          router.push("/login")
+        }, 2000)
+        return
+      }
+
+      // Inicio de sesión exitoso
+      const loginData = await loginResponse.json()
+      login(loginData.user, loginData.token)
 
       toast({
         title: "Registro exitoso",
-        description: "Tu cuenta ha sido creada correctamente. Ya puedes iniciar sesión.",
+        description: "Tu cuenta ha sido creada correctamente y has iniciado sesión automáticamente.",
       })
 
-      router.push("/login")
-    } catch (error) {
+      router.push("/")
+    } catch (error: any) {
+      console.error("Error en el registro:", error)
+      setErrorMessage(error.message || "Ha ocurrido un error al crear tu cuenta. Por favor, inténtalo de nuevo.")
       toast({
         title: "Error en el registro",
-        description: "Ha ocurrido un error al crear tu cuenta. Por favor, inténtalo de nuevo.",
+        description: error.message || "Ha ocurrido un error al crear tu cuenta. Por favor, inténtalo de nuevo.",
         variant: "destructive",
       })
     } finally {
@@ -81,6 +140,20 @@ export default function RegistroPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {errorMessage && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            )}
+
+            {successMessage && (
+              <div className="confirmation-message mb-4">
+                <CheckCircle className="h-4 w-4" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="nombre">Nombre completo</Label>
@@ -90,6 +163,7 @@ export default function RegistroPage() {
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
                   required
+                  className="text-base"
                 />
               </div>
 
@@ -102,6 +176,7 @@ export default function RegistroPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  className="text-base"
                 />
               </div>
 
@@ -113,6 +188,7 @@ export default function RegistroPage() {
                   placeholder="600 000 000"
                   value={telefono}
                   onChange={(e) => setTelefono(e.target.value)}
+                  className="text-base"
                 />
               </div>
 
@@ -121,15 +197,21 @@ export default function RegistroPage() {
                 <RadioGroup value={tipo} onValueChange={setTipo} className="flex space-x-4">
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="local" id="tipo-local" />
-                    <Label htmlFor="tipo-local">Local</Label>
+                    <Label htmlFor="tipo-local" className="text-base">
+                      Local
+                    </Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="no-local" id="tipo-no-local" />
-                    <Label htmlFor="tipo-no-local">No Local</Label>
+                    <Label htmlFor="tipo-no-local" className="text-base">
+                      No Local
+                    </Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="jubilado-local" id="tipo-jubilado" />
-                    <Label htmlFor="tipo-jubilado">Jubilado Local</Label>
+                    <Label htmlFor="tipo-jubilado" className="text-base">
+                      Jubilado Local
+                    </Label>
                   </div>
                 </RadioGroup>
               </div>
@@ -144,6 +226,7 @@ export default function RegistroPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    className="text-base"
                   />
                   <Button
                     type="button"
@@ -151,9 +234,9 @@ export default function RegistroPage() {
                     size="icon"
                     className="absolute right-0 top-0 h-full px-3 py-2 text-muted-foreground"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    <span className="sr-only">{showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}</span>
                   </Button>
                 </div>
               </div>
@@ -167,6 +250,7 @@ export default function RegistroPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
+                  className="text-base"
                 />
               </div>
 
@@ -185,7 +269,7 @@ export default function RegistroPage() {
                 </Label>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full text-base" disabled={isLoading}>
                 {isLoading ? "Creando cuenta..." : "Crear cuenta"}
               </Button>
             </form>

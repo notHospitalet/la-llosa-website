@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { Eye, EyeOff, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { getUsuarioByEmail, createUsuario, verifyPassword } from "@/lib/database"
+import { useAuth } from "@/components/auth-provider"
 
 type LoginModalProps = {
   onSuccess: () => void
@@ -20,6 +20,7 @@ type LoginModalProps = {
 export function LoginModal({ onSuccess, onClose }: LoginModalProps) {
   const [activeTab, setActiveTab] = useState("login")
   const [isLoading, setIsLoading] = useState(false)
+  const { login } = useAuth()
 
   // Login state
   const [loginEmail, setLoginEmail] = useState("")
@@ -77,38 +78,26 @@ export function LoginModal({ onSuccess, onClose }: LoginModalProps) {
     setIsLoading(true)
 
     try {
-      // Verificar credenciales
-      const usuario = await verifyPassword(loginEmail, loginPassword)
+      // Llamar a la API para iniciar sesión
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+        }),
+      })
 
-      if (!usuario) {
-        toast({
-          title: "Error de inicio de sesión",
-          description: "Credenciales incorrectas. Por favor, inténtalo de nuevo.",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || "Error al iniciar sesión")
       }
 
-      // Guardar sesión con JWT simulado
-      const token = btoa(
-        JSON.stringify({
-          id: usuario.id,
-          email: usuario.email,
-          exp: Date.now() + 24 * 60 * 60 * 1000, // 24 horas
-        }),
-      )
-
-      localStorage.setItem("auth_token", token)
-      localStorage.setItem(
-        "user",
-        JSON.stringify({
-          id: usuario.id,
-          name: usuario.nombre,
-          email: usuario.email,
-          tipo: "local", // Valor por defecto
-        }),
-      )
+      // Usar la función login del contexto de autenticación
+      login(data.user, data.token)
 
       toast({
         title: "¡Bienvenido!",
@@ -116,10 +105,10 @@ export function LoginModal({ onSuccess, onClose }: LoginModalProps) {
       })
 
       onSuccess()
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Ha ocurrido un error. Por favor, inténtalo de nuevo más tarde.",
+        description: error.message || "Credenciales incorrectas. Por favor, inténtalo de nuevo.",
         variant: "destructive",
       })
     } finally {
@@ -181,47 +170,29 @@ export function LoginModal({ onSuccess, onClose }: LoginModalProps) {
     setIsLoading(true)
 
     try {
-      // Verificar si el email ya existe
-      const existingUser = await getUsuarioByEmail(registerEmail)
-
-      if (existingUser) {
-        toast({
-          title: "Email ya registrado",
-          description: "Este correo electrónico ya está en uso",
-          variant: "destructive",
-        })
-        setIsLoading(false)
-        return
-      }
-
-      // Crear nuevo usuario
-      const newUser = await createUsuario({
-        nombre: registerName,
-        email: registerEmail,
-        telefono: registerPhone,
-        password: registerPassword,
-        tipo: "local", // Valor por defecto
-      })
-
-      // Guardar sesión con JWT simulado
-      const token = btoa(
-        JSON.stringify({
-          id: newUser.id,
-          email: newUser.email,
-          exp: Date.now() + 24 * 60 * 60 * 1000, // 24 horas
-        }),
-      )
-
-      localStorage.setItem("auth_token", token)
-      localStorage.setItem(
-        "user",
-        JSON.stringify({
-          id: newUser.id,
-          name: newUser.nombre,
-          email: newUser.email,
+      // Llamar a la API para registrar usuario
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nombre: registerName,
+          email: registerEmail,
+          telefono: registerPhone,
+          password: registerPassword,
           tipo: "local", // Valor por defecto
         }),
-      )
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || "Error al registrar usuario")
+      }
+
+      // Usar la función login del contexto de autenticación
+      login(data.user, data.token)
 
       toast({
         title: "¡Registro exitoso!",

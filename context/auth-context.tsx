@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 
@@ -13,8 +13,9 @@ type User = {
   imagenPerfil?: string
 }
 
-type AuthContextType = {
+export interface AuthContextType {
   user: User | null
+  token: string // Agrega esta línea si token es obligatorio
   isLoggedIn: boolean
   isLoading: boolean
   login: (user: User, token: string) => void
@@ -25,6 +26,7 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
+  token: "", // Agrega esta línea si token es obligatorio
   isLoggedIn: false,
   isLoading: true,
   login: () => {},
@@ -42,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const { toast } = useToast()
 
-  // Función para verificar y decodificar el token JWT
+  // Función para verifyToken
   const verifyToken = (token: string): boolean => {
     try {
       const tokenParts = token.split(".")
@@ -180,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        token: localStorage.getItem("auth_token") || "", // Agrega esta línea si token es obligatorio
         isLoggedIn,
         isLoading,
         login,

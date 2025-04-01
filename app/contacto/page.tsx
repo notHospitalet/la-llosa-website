@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast"
 import { motion } from "framer-motion"
 import { MapPin, Phone, Mail, Clock } from "lucide-react"
-import { sendEmail, createContactEmailContent } from "@/lib/email"
+import { createContactEmailContent } from "@/lib/email"
 
 export default function ContactoPage() {
   const [nombre, setNombre] = useState("")
@@ -22,6 +22,8 @@ export default function ContactoPage() {
   const [mensaje, setMensaje] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+
+  // Modificar la función handleSubmit para enviar el correo a pruebasllosa@gmail.com
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,12 +60,18 @@ export default function ContactoPage() {
         mensaje,
       })
 
-      // Enviar email
-      await sendEmail({
-        to: "info@ayuntamientolallosa.es",
-        subject: `Contacto Web: ${asunto}`,
-        text: emailContent.text,
-        html: emailContent.html,
+      // Enviar email al correo de la aplicación
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: "pruebasllosa@gmail.com", // Correo destino fijo
+          subject: `Contacto Web: ${asunto}`,
+          text: emailContent.text,
+          html: emailContent.html,
+        }),
       })
 
       toast({

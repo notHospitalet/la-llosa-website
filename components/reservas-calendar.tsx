@@ -63,9 +63,9 @@ export function ReservasCalendar({ onDateSelect, selectedDate, instalacionFilter
     return esHoraPasada(selectedDate, hora)
   }
 
-  // Función para verificar si una hora está ocupada
+  // Función para verificar si una hora está ocupada para la instalación específica
   const isHoraOcupada = (hora: string) => {
-    if (!selectedDate) return false
+    if (!selectedDate || !instalacionFilter) return false
 
     const horaIndex = horasDisponibles.indexOf(hora)
     if (horaIndex === -1) return false
@@ -73,6 +73,9 @@ export function ReservasCalendar({ onDateSelect, selectedDate, instalacionFilter
     const horaFin = horasDisponibles[horaIndex + 1] || "24:00"
 
     return reservasDelDia.some((r) => {
+      // Solo considerar reservas para la instalación específica
+      if (r.instalacion !== instalacionFilter) return false
+
       const rInicio = Number.parseInt(r.horaInicio.split(":")[0], 10)
       const rFin = r.horaFin ? Number.parseInt(r.horaFin.split(":")[0], 10) : rInicio + r.horas
       const inicio = Number.parseInt(hora.split(":")[0], 10)
@@ -82,6 +85,23 @@ export function ReservasCalendar({ onDateSelect, selectedDate, instalacionFilter
         (inicio >= rInicio && inicio < rFin) || (fin > rInicio && fin <= rFin) || (inicio <= rInicio && fin >= rFin)
       )
     })
+  }
+
+  // Función para verificar si una fecha es hoy (comparando con currentDate)
+  const isCurrentDay = (date: Date) => {
+    return (
+      date.getDate() === currentDate.getDate() &&
+      date.getMonth() === currentDate.getMonth() &&
+      date.getFullYear() === currentDate.getFullYear()
+    )
+  }
+
+  // Función para personalizar el día en el calendario
+  const dayClassName = (date: Date) => {
+    if (isCurrentDay(date)) {
+      return "bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200"
+    }
+    return ""
   }
 
   return (
@@ -99,6 +119,12 @@ export function ReservasCalendar({ onDateSelect, selectedDate, instalacionFilter
             locale={es}
             disabled={disabledDays}
             className="rounded-md border"
+            modifiersClassNames={{
+              today: "bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200",
+            }}
+            modifiers={{
+              today: (date) => isCurrentDay(date),
+            }}
           />
         </CardContent>
       </Card>

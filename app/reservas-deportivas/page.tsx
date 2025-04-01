@@ -1,8 +1,10 @@
 "use client"
 
+import Link from "next/link"
+
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -13,14 +15,159 @@ import { useToast } from "@/components/ui/use-toast"
 import { PaymentModal } from "@/components/payment-modal"
 import { useAuth } from "@/components/auth-provider"
 import { useRouter } from "next/navigation"
-import { ReservasCalendar } from "@/components/reservas-calendar"
-import { format } from "date-fns"
+import { Calendar } from "@/components/ui/calendar"
+import { format, isValid, isBefore, startOfDay } from "date-fns"
 import { es } from "date-fns/locale"
-import { createReserva, getReservasByDate } from "@/lib/mongodb"
-import { sendReservaNotification } from "@/lib/email-service"
-import { obtenerHorariosDisponibles, esHoraPasada, esHoraDisponible, determinarTemporada } from "@/lib/horarios-service"
+import {
+  obtenerHorariosDisponibles,
+  esHoraPasada,
+  esHoraDisponible,
+  determinarTemporada,
+  obtenerEstadoHoras,
+  getNombreInstalacion,
+} from "@/lib/horarios-service"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Info } from "lucide-react"
+import { Info, CalendarIcon, Clock, MapPin, Users, Sun, Mail, CheckCircle } from "lucide-react"
+import type { Reserva } from "@/lib/database"
+
+/**
+ * Función para crear una reserva llamando al endpoint /api/reservas,
+ * utilizando el token de autenticación obtenido desde el localStorage.
+ */
+async function createReserva(data: any, token: string): Promise<any> {
+  try {
+    console.log("Enviando solicitud a /api/reservas con token:", token ? "Token presente" : "Token ausente")
+    console.log("Datos de la reserva:", data)
+
+    const response = await fetch("/api/reservas", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    })
+
+    const responseData = await response.json()
+
+    if (!response.ok) {
+      console.error("Error en la respuesta:", responseData)
+      throw new Error(responseData.message || "Error al crear reserva")
+    }
+
+    return responseData
+  } catch (error: any) {
+    console.error("Error en createReserva:", error)
+    throw error
+  }
+}
+
+/**
+ * Función para obtener las reservas de una fecha determinada llamando al endpoint /api/reservas.
+ * Ahora puede filtrar por instalación específica.
+ */
+async function getReservasByDate(date: Date, instalacion?: string): Promise<Reserva[]> {
+  try {
+    // Verificar que la fecha sea válida
+    if (!isValid(date)) {
+      console.warn("Fecha inválida en getReservasByDate:", date)
+      return []
+    }
+
+    const token = localStorage.getItem("auth_token")
+    if (!token) {
+      throw new Error("No se encontró token de autenticación")
+    }
+
+    const formattedDate = date.toISOString().split("T")[0]
+    let url = `/api/reservas?fecha=${formattedDate}`
+
+    // Añadir filtro de instalación si se proporciona
+    if (instalacion) {
+      url += `&instalacion=${encodeURIComponent(getNombreInstalacion(instalacion))}`
+    }
+
+    console.log("Consultando reservas con URL:", url)
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error("Error al obtener reservas")
+    }
+
+    const data = await response.json()
+    console.log("Reservas obtenidas:", data)
+
+    // Asegurarse de que las fechas sean objetos Date válidos
+    return data.map((reserva: any) => {
+      if (typeof reserva.fecha === "string") {
+        try {
+          const fechaObj = new Date(reserva.fecha)
+          return {
+            ...reserva,
+            fecha: isValid(fechaObj) ? fechaObj : new Date(), // Usar fecha actual como fallback
+          }
+        } catch (error) {
+          console.error("Error al convertir fecha:", error)
+          return {
+            ...reserva,
+            fecha: new Date(), // Usar fecha actual como fallback
+          }
+        }
+      }
+      return reserva
+    })
+  } catch (error) {
+    console.error("Error al obtener reservas por fecha:", error)
+    return []
+  }
+}
+
+/**
+ * Función para enviar notificación de reserva a través del endpoint /api/send-reserva-notification.
+ */
+async function notificarReserva(data: any): Promise<any> {
+  try {
+    const response = await fetch("/api/send-reserva-notification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      throw new Error("Error al enviar notificación por email")
+    }
+    return await response.json()
+  } catch (error) {
+    console.error("Error al enviar notificación:", error)
+    // No lanzamos error para que no interrumpa el flujo principal
+    return { success: false, error: error }
+  }
+}
+
+// Interfaz extendida para User con telefono opcional
+interface ExtendedUser {
+  id: string
+  name: string
+  email: string
+  telefono?: string
+  dni?: string
+  tipo?: string
+}
+
+// Función para verificar si una fecha es el día actual
+const isCurrentDay = (date: Date) => {
+  const today = new Date()
+  return (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  )
+}
 
 export default function ReservasDeportivas() {
   const [instalacion, setInstalacion] = useState("")
@@ -34,8 +181,21 @@ export default function ReservasDeportivas() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [dni, setDni] = useState("")
   const [horasDisponibles, setHorasDisponibles] = useState<string[]>([])
-  const [reservasDelDia, setReservasDelDia] = useState<any[]>([])
+  const [reservasDelDia, setReservasDelDia] = useState<Reserva[]>([])
   const [temporada, setTemporada] = useState<"invierno" | "verano">("invierno")
+  const [estadoHoras, setEstadoHoras] = useState<
+    {
+      hora: string
+      disponible: boolean
+      pasada: boolean
+      reservada: boolean
+      instalacionOcupada?: string
+    }[]
+  >([])
+  const [maxHorasDisponibles, setMaxHorasDisponibles] = useState(1)
+  const [step, setStep] = useState(1)
+  const [reservaCompletada, setReservaCompletada] = useState(false)
+  const [reservaId, setReservaId] = useState<string | null>(null)
 
   const { toast } = useToast()
   const { isLoggedIn, user } = useAuth()
@@ -48,6 +208,62 @@ export default function ReservasDeportivas() {
     }
   }, [user])
 
+  // Resetear hora de inicio cuando cambia la instalación
+  useEffect(() => {
+    setHoraInicio("")
+    setHoras(1)
+
+    // Si ya hay una fecha seleccionada, recargar las reservas con la nueva instalación
+    if (selectedDate) {
+      cargarReservasDelDia(selectedDate, instalacion)
+    }
+  }, [instalacion])
+
+  // Función para cargar las reservas del día seleccionado
+  const cargarReservasDelDia = async (fecha: Date, instalacionSeleccionada?: string) => {
+    try {
+      // Verificar que la fecha sea válida
+      if (!isValid(fecha)) {
+        console.warn("Fecha inválida en cargarReservasDelDia:", fecha)
+        setReservasDelDia([])
+        setEstadoHoras([])
+        setHorasDisponibles([])
+        return
+      }
+
+      // Obtener todas las reservas del día
+      const reservas = await getReservasByDate(fecha)
+      console.log("Reservas obtenidas:", reservas)
+
+      // Verificar que las fechas de las reservas sean válidas
+      const reservasValidas = reservas.filter((r) => {
+        if (typeof r.fecha === "string") {
+          return isValid(new Date(r.fecha))
+        }
+        return isValid(r.fecha)
+      })
+
+      setReservasDelDia(reservasValidas)
+
+      // Obtener estado de cada hora para la instalación específica
+      const estadoHoras = obtenerEstadoHoras(fecha, reservasValidas, instalacionSeleccionada)
+      setEstadoHoras(estadoHoras)
+
+      // Obtener solo las horas disponibles para el selector
+      const soloHorasDisponibles = estadoHoras.filter((h) => h.disponible).map((h) => h.hora)
+      setHorasDisponibles(soloHorasDisponibles)
+
+      console.log("Horas disponibles para", instalacionSeleccionada, ":", soloHorasDisponibles)
+    } catch (error) {
+      console.error("Error al cargar reservas:", error)
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar las reservas existentes",
+        variant: "destructive",
+      })
+    }
+  }
+
   // Actualizar temporada cuando cambia la fecha seleccionada
   useEffect(() => {
     if (selectedDate) {
@@ -56,28 +272,37 @@ export default function ReservasDeportivas() {
 
       // Resetear hora de inicio al cambiar de fecha
       setHoraInicio("")
+      setHoras(1)
+
+      // Cargar reservas del día seleccionado
+      cargarReservasDelDia(selectedDate, instalacion)
     }
   }, [selectedDate])
 
-  // Cargar horas disponibles según la temporada y fecha
+  // Actualizar máximo de horas disponibles consecutivas cuando cambia la hora de inicio
   useEffect(() => {
-    if (selectedDate) {
-      const horariosTemporada = obtenerHorariosDisponibles(selectedDate)
-      setHorasDisponibles(horariosTemporada)
+    if (horaInicio && estadoHoras.length > 0) {
+      const horaInicioIndex = estadoHoras.findIndex((h) => h.hora === horaInicio)
+      if (horaInicioIndex === -1) return
 
-      // Cargar reservas del día seleccionado
-      const cargarReservasDelDia = async () => {
-        try {
-          const reservas = await getReservasByDate(selectedDate)
-          setReservasDelDia(reservas)
-        } catch (error) {
-          console.error("Error al cargar reservas:", error)
+      // Contar cuántas horas consecutivas están disponibles a partir de la hora de inicio
+      let horasConsecutivas = 1
+      for (let i = horaInicioIndex + 1; i < estadoHoras.length; i++) {
+        if (estadoHoras[i].disponible) {
+          horasConsecutivas++
+        } else {
+          break
         }
       }
 
-      cargarReservasDelDia()
+      setMaxHorasDisponibles(horasConsecutivas)
+
+      // Ajustar las horas seleccionadas si exceden el máximo disponible
+      if (horas > horasConsecutivas) {
+        setHoras(horasConsecutivas)
+      }
     }
-  }, [selectedDate, temporada])
+  }, [horaInicio, estadoHoras, horas])
 
   // Calcular precio basado en selecciones
   useEffect(() => {
@@ -126,16 +351,28 @@ export default function ReservasDeportivas() {
 
     // Calcular hora de fin
     const horaInicioIndex = horasDisponibles.indexOf(horaInicio)
-    if (horaInicioIndex === -1 || horaInicioIndex + horas > horasDisponibles.length) {
+    if (horaInicioIndex === -1) {
       toast({
         title: "Error en la selección de horas",
-        description: "La hora seleccionada no es válida o excede el horario disponible",
+        description: "La hora seleccionada no es válida",
         variant: "destructive",
       })
       return
     }
 
-    const horaFin = horasDisponibles[horaInicioIndex + horas]
+    // Verificar si hay suficientes horas disponibles
+    if (horaInicioIndex + horas > horasDisponibles.length) {
+      toast({
+        title: "Error en la selección de horas",
+        description: "No hay suficientes horas disponibles consecutivas",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const allHoras = obtenerHorariosDisponibles(selectedDate)
+    const horaFinIndex = allHoras.indexOf(horaInicio) + horas
+    const horaFin = allHoras[horaFinIndex]
 
     // Verificar si la hora está en el pasado
     if (esHoraPasada(selectedDate, horaInicio)) {
@@ -147,12 +384,12 @@ export default function ReservasDeportivas() {
       return
     }
 
-    // Verificar disponibilidad
-    const disponible = esHoraDisponible(selectedDate, horaInicio, horaFin, reservasDelDia)
+    // Verificar disponibilidad nuevamente (por si acaso), ahora con la instalación específica
+    const disponible = esHoraDisponible(selectedDate, horaInicio, horaFin, reservasDelDia, instalacion)
     if (!disponible) {
       toast({
         title: "Horario no disponible",
-        description: "El horario seleccionado ya está reservado. Por favor, elige otro horario.",
+        description: `El horario seleccionado ya está reservado para ${getNombreInstalacion(instalacion)}. Por favor, elige otro horario.`,
         variant: "destructive",
       })
       return
@@ -161,28 +398,38 @@ export default function ReservasDeportivas() {
     setShowPaymentModal(true)
   }
 
-  const handlePaymentSuccess = async () => {
+  const handlePaymentSuccess = async (metodoPago: string) => {
     setIsLoading(true)
 
     try {
       // Calcular hora de fin
-      const horaInicioIndex = horasDisponibles.indexOf(horaInicio)
-      const horaFin = horasDisponibles[horaInicioIndex + horas]
+      const allHoras = obtenerHorariosDisponibles(selectedDate!)
+      const horaFinIndex = allHoras.indexOf(horaInicio) + horas
+      const horaFin = allHoras[horaFinIndex]
 
       if (!user) {
         throw new Error("Usuario no autenticado")
       }
 
-      // Crear reserva en la base de datos
-      const nuevaReserva = await createReserva({
+      // Obtener token de autenticación
+      const token = localStorage.getItem("auth_token")
+      if (!token) {
+        throw new Error("No se encontró token de autenticación")
+      }
+
+      // Tratar al usuario como ExtendedUser para acceder a telefono
+      const extendedUser = user as ExtendedUser
+
+      // Preparar datos de la reserva
+      const reservaData = {
         idUsuario: user.id,
         nombre: user.name,
         email: user.email,
-        telefono: "600123456", // En un caso real, esto vendría del perfil del usuario
+        telefono: extendedUser.telefono || "600123456", // Usar telefono del usuario si está disponible
         dni: dni,
-        instalacion,
+        instalacion: getNombreInstalacion(instalacion),
         tipoReserva: "deportiva",
-        fecha: selectedDate!,
+        fecha: selectedDate!.toISOString(), // Asegurar que la fecha se envía en formato ISO
         horaInicio,
         horaFin,
         horas,
@@ -190,15 +437,27 @@ export default function ReservasDeportivas() {
         esLocal,
         conLuz,
         estado: "confirmada",
-      })
+        metodoPago: metodoPago,
+      }
 
-      // Enviar correos de notificación
-      await sendReservaNotification({
+      console.log("Enviando datos de reserva:", reservaData)
+
+      // Crear reserva en la base de datos con token
+      const nuevaReserva = await createReserva(reservaData, token)
+      console.log("Reserva creada:", nuevaReserva)
+
+      // Guardar el ID de la reserva
+      if (nuevaReserva && nuevaReserva.id) {
+        setReservaId(nuevaReserva.id)
+      }
+
+      // Enviar notificación vía endpoint (se ejecuta en el servidor)
+      await notificarReserva({
         nombre: user.name,
         email: user.email,
-        telefono: "600123456",
+        telefono: extendedUser.telefono || "600123456",
         dni: dni,
-        instalacion,
+        instalacion: getNombreInstalacion(instalacion),
         fecha: selectedDate!,
         horaInicio,
         horaFin,
@@ -207,28 +466,42 @@ export default function ReservasDeportivas() {
         esLocal,
         conLuz,
         estado: "confirmada",
+        metodoPago: metodoPago,
       })
 
       toast({
         title: "Reserva confirmada",
-        description: `Has reservado ${instalacion} para el ${format(selectedDate!, "PPP", { locale: es })} de ${horaInicio} a ${horaFin}`,
+        description: `Has reservado ${getNombreInstalacion(instalacion)} para el ${format(selectedDate!, "PPP", {
+          locale: es,
+        })} de ${horaInicio} a ${horaFin}`,
       })
 
-      // Resetear formulario
-      setInstalacion("")
-      setSelectedDate(undefined)
-      setHoraInicio("")
-      setHoras(1)
-    } catch (error) {
+      // Actualizar las reservas del día para reflejar la nueva reserva
+      await cargarReservasDelDia(selectedDate!, instalacion)
+
+      // Mostrar mensaje de confirmación
+      setReservaCompletada(true)
+    } catch (error: any) {
       console.error("Error al procesar la reserva:", error)
       toast({
         title: "Error al procesar la reserva",
-        description: "Ha ocurrido un error. Por favor, inténtalo de nuevo más tarde.",
+        description: error.message || "Ha ocurrido un error. Por favor, inténtalo de nuevo más tarde.",
         variant: "destructive",
       })
     } finally {
       setIsLoading(false)
+      setShowPaymentModal(false)
     }
+  }
+
+  const resetForm = () => {
+    setInstalacion("")
+    setSelectedDate(undefined)
+    setHoraInicio("")
+    setHoras(1)
+    setStep(1)
+    setReservaCompletada(false)
+    setReservaId(null)
   }
 
   const fadeIn = {
@@ -240,12 +513,19 @@ export default function ReservasDeportivas() {
     },
   }
 
+  // Función para deshabilitar fechas pasadas
+  const disabledDays = (date: Date) => {
+    // Deshabilitar días anteriores a la fecha actual
+    const today = new Date()
+    return isBefore(date, startOfDay(today))
+  }
+
   return (
     <div className="container mx-auto px-4 py-12">
       <motion.div className="max-w-6xl mx-auto" initial="hidden" animate="visible" variants={fadeIn}>
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-2">Reservas Deportivas</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-4xl font-bold mb-2">Reservas Deportivas</h1>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Reserva nuestras instalaciones deportivas con precios especiales para residentes locales.
           </p>
         </div>
@@ -259,169 +539,551 @@ export default function ReservasDeportivas() {
           </AlertDescription>
         </Alert>
 
-        {/* Calendario de Reservas */}
-        <div className="mb-12">
-          <ReservasCalendar
-            onDateSelect={setSelectedDate}
-            selectedDate={selectedDate}
-            instalacionFilter={instalacion || undefined}
-          />
+        {/* Proceso de reserva en pasos */}
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex-1 text-center">
+              <div
+                className={`rounded-full h-10 w-10 flex items-center justify-center mx-auto mb-2 ${step >= 1 ? "bg-primary text-white" : "bg-muted"}`}
+              >
+                1
+              </div>
+              <p className={`text-sm ${step >= 1 ? "font-medium" : "text-muted-foreground"}`}>
+                Seleccionar instalación
+              </p>
+            </div>
+            <div className={`h-1 flex-1 ${step >= 2 ? "bg-primary" : "bg-muted"}`}></div>
+            <div className="flex-1 text-center">
+              <div
+                className={`rounded-full h-10 w-10 flex items-center justify-center mx-auto mb-2 ${step >= 2 ? "bg-primary text-white" : "bg-muted"}`}
+              >
+                2
+              </div>
+              <p className={`text-sm ${step >= 2 ? "font-medium" : "text-muted-foreground"}`}>Elegir fecha y hora</p>
+            </div>
+            <div className={`h-1 flex-1 ${step >= 3 ? "bg-primary" : "bg-muted"}`}></div>
+            <div className="flex-1 text-center">
+              <div
+                className={`rounded-full h-10 w-10 flex items-center justify-center mx-auto mb-2 ${step >= 3 ? "bg-primary text-white" : "bg-muted"}`}
+              >
+                3
+              </div>
+              <p className={`text-sm ${step >= 3 ? "font-medium" : "text-muted-foreground"}`}>Confirmar reserva</p>
+            </div>
+          </div>
         </div>
 
-        <Card className="border-none shadow-lg">
-          <CardHeader>
-            <CardTitle>Formulario de Reserva</CardTitle>
-            <CardDescription>Selecciona la instalación, fecha y horario para tu reserva.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Selección de Instalación */}
-            <div className="space-y-2">
-              <Label htmlFor="instalacion">Instalación</Label>
-              <Select value={instalacion} onValueChange={setInstalacion}>
-                <SelectTrigger id="instalacion" className="h-10">
-                  <SelectValue placeholder="Selecciona una instalación" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="padel">Pádel</SelectItem>
-                  <SelectItem value="futbol">Fútbol</SelectItem>
-                  <SelectItem value="futbol-sala">Fútbol Sala</SelectItem>
-                  <SelectItem value="fronton">Frontón</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Selección de Condición (Local/No Local) */}
-            <div className="flex items-center space-x-2">
-              <Checkbox id="es-local" checked={esLocal} onCheckedChange={(checked) => setEsLocal(checked as boolean)} />
-              <Label htmlFor="es-local" className="cursor-pointer">
-                Usuario Local
-              </Label>
-            </div>
-
-            {/* Campo DNI (obligatorio para usuarios locales) */}
-            {esLocal && (
-              <div className="space-y-2">
-                <Label htmlFor="dni">DNI (obligatorio para usuarios locales)</Label>
-                <Input
-                  id="dni"
-                  placeholder="12345678A"
-                  value={dni}
-                  onChange={(e) => setDni(e.target.value)}
-                  required
-                  className="h-10"
-                />
-              </div>
-            )}
-
-            {/* Selección de Luz */}
-            <div className="flex items-center space-x-2">
-              <Checkbox id="con-luz" checked={conLuz} onCheckedChange={(checked) => setConLuz(checked as boolean)} />
-              <Label htmlFor="con-luz" className="cursor-pointer">
-                Con Luz
-              </Label>
-            </div>
-
-            {/* Selección de Fecha y Hora */}
-            <div className="space-y-2">
-              <Label htmlFor="hora-inicio">Hora de Inicio</Label>
-              <Select value={horaInicio} onValueChange={setHoraInicio} disabled={!selectedDate}>
-                <SelectTrigger id="hora-inicio" className="h-10">
-                  <SelectValue placeholder="Selecciona hora de inicio" />
-                </SelectTrigger>
-                <SelectContent>
-                  {horasDisponibles.slice(0, -1).map((hora) => {
-                    const isPasada = esHoraPasada(selectedDate!, hora)
-                    const horaFin = horasDisponibles[horasDisponibles.indexOf(hora) + 1]
-                    const isOcupada = !esHoraDisponible(selectedDate!, hora, horaFin, reservasDelDia)
-
-                    return (
-                      <SelectItem
-                        key={hora}
-                        value={hora}
-                        disabled={isPasada || isOcupada}
-                        className={`${isPasada ? "text-muted-foreground line-through" : ""} ${isOcupada ? "text-red-500" : ""}`}
-                      >
-                        {hora} {isPasada ? "(Pasada)" : isOcupada ? "(Ocupada)" : ""}
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Selección de Horas */}
-            <div className="space-y-2">
-              <Label htmlFor="horas">Número de horas</Label>
-              <Input
-                id="horas"
-                type="number"
-                min={1}
-                max={5}
-                value={horas}
-                onChange={(e) => setHoras(Number.parseInt(e.target.value) || 1)}
-                disabled={!horaInicio}
-                className="h-10"
-              />
-            </div>
-
-            {/* Resumen de Precio */}
-            <div className="pt-4 border-t">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">Precio Total:</span>
-                <span className="text-xl font-bold">
-                  {precio === 0 && esLocal && !conLuz ? "Gratis" : `${precio.toFixed(2)} €`}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {esLocal && !conLuz ? (
-                  <span className="text-green-600 dark:text-green-400">Gratuito para usuarios locales sin luz</span>
-                ) : (
-                  <span>
-                    {precio > 0 && `${(precio / horas).toFixed(2)} € × ${horas} ${horas === 1 ? "hora" : "horas"}`}
-                  </span>
-                )}
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-end space-x-2">
-            <Button variant="outline" className="h-10">
-              Cancelar
-            </Button>
-            <Button
-              disabled={!instalacion || !selectedDate || !horaInicio || isLoading || (esLocal && !dni)}
-              onClick={handleSubmit}
-              className="h-10"
+        {/* Paso 1: Selección de instalación */}
+        {step === 1 && (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <Card
+              className={`border-2 cursor-pointer transition-all hover:shadow-md ${instalacion === "padel" ? "border-primary" : "border-transparent"}`}
+              onClick={() => {
+                setInstalacion("padel")
+                setStep(2)
+              }}
             >
-              {isLoading ? (
-                <span className="flex items-center">
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
+              <CardContent className="p-6 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Pista de Pádel</h3>
+                <p className="text-sm text-muted-foreground mb-4">Pista de pádel con iluminación</p>
+                <div className="mt-auto">
+                  <p className="text-sm font-medium">
+                    Desde <span className="text-lg font-bold text-primary">0€</span> para locales
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className={`border-2 cursor-pointer transition-all hover:shadow-md ${instalacion === "futbol" ? "border-primary" : "border-transparent"}`}
+              onClick={() => {
+                setInstalacion("futbol")
+                setStep(2)
+              }}
+            >
+              <CardContent className="p-6 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Campo de Fútbol</h3>
+                <p className="text-sm text-muted-foreground mb-4">Campo de fútbol con iluminación</p>
+                <div className="mt-auto">
+                  <p className="text-sm font-medium">
+                    Desde <span className="text-lg font-bold text-primary">0€</span> para locales
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className={`border-2 cursor-pointer transition-all hover:shadow-md ${instalacion === "futbol-sala" ? "border-primary" : "border-transparent"}`}
+              onClick={() => {
+                setInstalacion("futbol-sala")
+                setStep(2)
+              }}
+            >
+              <CardContent className="p-6 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Fútbol Sala</h3>
+                <p className="text-sm text-muted-foreground mb-4">Pista de fútbol sala con iluminación</p>
+                <div className="mt-auto">
+                  <p className="text-sm font-medium">
+                    Desde <span className="text-lg font-bold text-primary">0€</span> para locales
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className={`border-2 cursor-pointer transition-all hover:shadow-md ${instalacion === "fronton" ? "border-primary" : "border-transparent"}`}
+              onClick={() => {
+                setInstalacion("fronton")
+                setStep(2)
+              }}
+            >
+              <CardContent className="p-6 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Frontón</h3>
+                <p className="text-sm text-muted-foreground mb-4">Frontón con iluminación</p>
+                <div className="mt-auto">
+                  <p className="text-sm font-medium">
+                    Desde <span className="text-lg font-bold text-primary">0€</span> para locales
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Paso 2: Selección de fecha y hora - NUEVO DISEÑO */}
+        {step === 2 && (
+          <div className="mb-8">
+            <Card className="border-none shadow-lg mb-6">
+              <CardHeader className="pb-2">
+                <div className="flex items-center mb-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mr-2"
+                    onClick={() => {
+                      setStep(1)
+                      setSelectedDate(undefined)
+                      setHoraInicio("")
+                    }}
                   >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
-                  Procesando...
-                </span>
-              ) : (
-                "Solicitar Reserva"
-              )}
-            </Button>
-          </CardFooter>
-        </Card>
+                    ← Volver
+                  </Button>
+                  <CardTitle>Selecciona fecha y hora</CardTitle>
+                </div>
+                <CardDescription>
+                  Reservando: <span className="font-medium">{getNombreInstalacion(instalacion)}</span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-2 gap-8">
+                  {/* Lado izquierdo: Formulario de reserva */}
+                  <div className="space-y-6">
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-medium">Detalles de la reserva</h3>
+
+                      {/* Selección de hora */}
+                      <div className="space-y-2">
+                        <Label htmlFor="hora-inicio">Hora de inicio</Label>
+                        <Select
+                          value={horaInicio}
+                          onValueChange={setHoraInicio}
+                          disabled={!selectedDate || horasDisponibles.length === 0}
+                        >
+                          <SelectTrigger id="hora-inicio" className="h-10">
+                            <SelectValue
+                              placeholder={
+                                !selectedDate
+                                  ? "Selecciona primero una fecha"
+                                  : horasDisponibles.length === 0
+                                    ? `No hay horas disponibles para ${getNombreInstalacion(instalacion)}`
+                                    : "Selecciona hora de inicio"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {horasDisponibles.length === 0 ? (
+                              <SelectItem value="no-disponible" disabled>
+                                No hay horas disponibles
+                              </SelectItem>
+                            ) : (
+                              estadoHoras.map((horaInfo) => (
+                                <SelectItem
+                                  key={horaInfo.hora}
+                                  value={horaInfo.hora}
+                                  disabled={!horaInfo.disponible}
+                                  className={`${horaInfo.pasada ? "text-muted-foreground line-through" : ""} ${horaInfo.reservada ? "text-red-500" : ""}`}
+                                >
+                                  {horaInfo.hora}
+                                  {horaInfo.pasada ? " (Pasada)" : horaInfo.reservada ? " (Ocupada)" : ""}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+
+                        {selectedDate && horasDisponibles.length === 0 && (
+                          <p className="text-xs text-red-500 mt-1">
+                            No hay horas disponibles para {getNombreInstalacion(instalacion)} en esta fecha. Por favor,
+                            selecciona otra fecha.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Selección de duración */}
+                      <div className="space-y-2">
+                        <Label htmlFor="horas">Duración (horas)</Label>
+                        <div className="flex space-x-2">
+                          {[1, 2, 3, 4, 5].map((h: number) => (
+                            <Button
+                              key={h}
+                              type="button"
+                              variant={horas === h ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setHoras(h)}
+                              disabled={!horaInicio || h > maxHorasDisponibles}
+                              className="flex-1"
+                            >
+                              {h}
+                            </Button>
+                          ))}
+                        </div>
+                        {horaInicio && (
+                          <p className="text-xs text-muted-foreground">
+                            Máximo disponible: {maxHorasDisponibles} {maxHorasDisponibles === 1 ? "hora" : "horas"}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Opciones adicionales */}
+                      <div className="space-y-4 pt-4 border-t">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="es-local"
+                            checked={esLocal}
+                            onCheckedChange={(checked) => setEsLocal(checked as boolean)}
+                          />
+                          <Label htmlFor="es-local" className="cursor-pointer">
+                            Usuario Local
+                          </Label>
+                        </div>
+
+                        {esLocal && (
+                          <div className="space-y-2 pl-6">
+                            <Label htmlFor="dni">DNI (obligatorio para usuarios locales)</Label>
+                            <Input
+                              id="dni"
+                              placeholder="12345678A"
+                              value={dni}
+                              onChange={(e) => setDni(e.target.value)}
+                              required
+                              className="h-10"
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="con-luz"
+                            checked={conLuz}
+                            onCheckedChange={(checked) => setConLuz(checked as boolean)}
+                          />
+                          <Label htmlFor="con-luz" className="cursor-pointer flex items-center">
+                            <Sun className="h-4 w-4 mr-1" />
+                            Con Luz
+                          </Label>
+                        </div>
+                      </div>
+
+                      {/* Resumen y precio */}
+                      <div className="pt-4 border-t">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium">Precio Total:</span>
+                          <span className="text-xl font-bold">
+                            {precio === 0 && esLocal && !conLuz ? "Gratis" : `${precio.toFixed(2)} €`}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {esLocal && !conLuz ? (
+                            <span className="text-green-600 dark:text-green-400">
+                              Gratuito para usuarios locales sin luz
+                            </span>
+                          ) : (
+                            <span>
+                              {precio > 0 &&
+                                `${(precio / horas).toFixed(2)} € × ${horas} ${horas === 1 ? "hora" : "horas"}`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lado derecho: Calendario interactivo */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium">Selecciona una fecha</h3>
+                    <div className="bg-card rounded-lg p-4 border shadow-sm">
+                      <Calendar
+                        mode="single"
+                        selected={selectedDate}
+                        onSelect={setSelectedDate}
+                        locale={es}
+                        className="mx-auto"
+                        disabled={disabledDays}
+                        modifiersClassNames={{
+                          today: "bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200",
+                        }}
+                        modifiers={{
+                          today: (date) => isCurrentDay(date),
+                        }}
+                      />
+                    </div>
+
+                    {selectedDate && (
+                      <div className="bg-muted/30 p-4 rounded-lg">
+                        <h4 className="font-medium mb-2 flex items-center">
+                          <CalendarIcon className="h-4 w-4 mr-2 text-primary" />
+                          {format(selectedDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: es })}
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Selecciona una hora disponible para completar tu reserva.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Botón de continuar */}
+                <div className="mt-8 flex justify-end">
+                  <Button
+                    className="w-full md:w-auto"
+                    disabled={!selectedDate || !horaInicio}
+                    onClick={() => setStep(3)}
+                  >
+                    Continuar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Paso 3: Confirmación de reserva */}
+        {step === 3 && !reservaCompletada && (
+          <Card className="border-none shadow-lg">
+            <CardHeader className="pb-2">
+              <div className="flex items-center mb-2">
+                <Button variant="ghost" size="sm" className="mr-2" onClick={() => setStep(2)}>
+                  ← Volver
+                </Button>
+                <CardTitle>Confirmar reserva</CardTitle>
+              </div>
+              <CardDescription>Revisa los detalles de tu reserva antes de confirmar</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="bg-muted/30 p-6 rounded-lg">
+                <h3 className="text-xl font-bold mb-4">{getNombreInstalacion(instalacion)}</h3>
+
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <div className="flex items-start">
+                      <CalendarIcon className="h-5 w-5 mr-3 mt-0.5 text-primary" />
+                      <div>
+                        <p className="font-medium">Fecha</p>
+                        <p className="text-muted-foreground">
+                          {selectedDate ? format(selectedDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: es }) : ""}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start">
+                      <Clock className="h-5 w-5 mr-3 mt-0.5 text-primary" />
+                      <div>
+                        <p className="font-medium">Horario</p>
+                        <p className="text-muted-foreground">
+                          {horaInicio} -{" "}
+                          {
+                            obtenerHorariosDisponibles(selectedDate!)[
+                              obtenerHorariosDisponibles(selectedDate!).indexOf(horaInicio) + horas
+                            ]
+                          }{" "}
+                          ({horas} {horas === 1 ? "hora" : "horas"})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start">
+                      <MapPin className="h-5 w-5 mr-3 mt-0.5 text-primary" />
+                      <div>
+                        <p className="font-medium">Ubicación</p>
+                        <p className="text-muted-foreground">Polideportivo Municipal de La Llosa</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-start">
+                      <Users className="h-5 w-5 mr-3 mt-0.5 text-primary" />
+                      <div>
+                        <p className="font-medium">Tipo de usuario</p>
+                        <p className="text-muted-foreground">{esLocal ? "Local" : "No local"}</p>
+                      </div>
+                    </div>
+
+                    {esLocal && (
+                      <div className="flex items-start">
+                        <div className="h-5 w-5 mr-3 mt-0.5 flex items-center justify-center text-primary">
+                          <span className="font-bold">ID</span>
+                        </div>
+                        <div>
+                          <p className="font-medium">DNI</p>
+                          <p className="text-muted-foreground">{dni}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-start">
+                      <Sun className="h-5 w-5 mr-3 mt-0.5 text-primary" />
+                      <div>
+                        <p className="font-medium">Iluminación</p>
+                        <p className="text-muted-foreground">{conLuz ? "Con luz" : "Sin luz"}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-4 border-t">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-medium">Precio Total:</span>
+                    <span className="text-2xl font-bold text-primary">
+                      {precio === 0 && esLocal && !conLuz ? "Gratis" : `${precio.toFixed(2)} €`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Aviso de correo electrónico */}
+              <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
+                <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <AlertDescription>
+                  Recibirás un correo electrónico con los detalles de tu reserva una vez confirmada.
+                </AlertDescription>
+              </Alert>
+
+              <div className="flex justify-between space-x-4">
+                <Button variant="outline" onClick={() => setStep(2)} className="flex-1">
+                  Modificar
+                </Button>
+                <Button className="flex-1" onClick={handleSubmit} disabled={isLoading || (esLocal && !dni)}>
+                  {isLoading ? (
+                    <span className="flex items-center">
+                      <svg
+                        className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Procesando...
+                    </span>
+                  ) : (
+                    "Confirmar y Pagar"
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Confirmación de reserva completada */}
+        {reservaCompletada && (
+          <Card className="border-none shadow-lg">
+            <CardContent className="pt-6 pb-6">
+              <div className="text-center space-y-4">
+                <div className="flex justify-center">
+                  <div className="rounded-full bg-green-100 dark:bg-green-900/30 p-3">
+                    <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold">¡Reserva Confirmada!</h2>
+                <p className="text-muted-foreground">
+                  Tu reserva de {getNombreInstalacion(instalacion)} para el{" "}
+                  {selectedDate ? format(selectedDate, "PPP", { locale: es }) : ""} ha sido confirmada.
+                </p>
+
+                <div className="bg-muted/30 p-6 rounded-lg max-w-md mx-auto mt-4 text-left">
+                  <div className="space-y-3">
+                    <div className="flex items-center">
+                      <CalendarIcon className="h-5 w-5 mr-3 text-primary" />
+                      <div>
+                        <p className="font-medium">
+                          {selectedDate ? format(selectedDate, "EEEE, d 'de' MMMM", { locale: es }) : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center">
+                      <Clock className="h-5 w-5 mr-3 text-primary" />
+                      <div>
+                        <p className="font-medium">
+                          {horaInicio} -{" "}
+                          {
+                            obtenerHorariosDisponibles(selectedDate!)[
+                              obtenerHorariosDisponibles(selectedDate!).indexOf(horaInicio) + horas
+                            ]
+                          }
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center">
+                      <MapPin className="h-5 w-5 mr-3 text-primary" />
+                      <div>
+                        <p className="font-medium">Polideportivo Municipal de La Llosa</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 max-w-md mx-auto">
+                  <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <AlertDescription>
+                    Hemos enviado un correo electrónico a {user?.email} con los detalles de tu reserva.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+                  <Button onClick={resetForm}>Realizar otra reserva</Button>
+                  <Button variant="outline" asChild>
+                    <Link href="/mis-reservas">Ver mis reservas</Link>
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </motion.div>
 
       {/* Modal de Pago */}
